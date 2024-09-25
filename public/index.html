@@ -8,7 +8,7 @@
         body {
             margin: 0;
             padding: 0;
-            height: 100vh;
+            height: auto;
             background-color: #f4f4f4;
             display: flex;
             flex-direction: column;
@@ -63,7 +63,6 @@
             display: flex;
             justify-content: center;
             align-items: center;
-            margin-top: 20px;
         }
 
         #text-input {
@@ -80,11 +79,14 @@
         }
 
         .canvas-container {
+            border: 1px solid;
             position: relative;
             display: flex;
             justify-content: center;
             align-items: center;
-            width: 95%;
+            max-width: 794px;
+            max-height: 1123px;
+            width: 100%;
             height: auto;
         }
 
@@ -104,13 +106,16 @@
                 visibility: hidden;
                 background-color: none;
             }
+            /* 전체 페이지 여백 없애기 */
+            @page {
+                margin: 0;
+            }
             #pdf-render {
                 visibility: visible;
                 position: absolute;
-                top: 0;
                 left: 0;
                 width: 100%;
-                transform: translateY(-85px);
+                transform: translateY(470px);
             }
             #pdf-container {
                 visibility: visible;
@@ -118,15 +123,7 @@
             }
             #text-input {
                 display: none; /* 인쇄할 때 텍스트 입력 요소 완전히 숨기기 */
-
-            #pdf-container canvas {
-                page-break-after: always;
             }
-             /* 전체 페이지 여백 없애기 */
-            @page {
-                margin: 0;
-            }
-        }
         }
        
     </style>
@@ -153,6 +150,7 @@
     <!-- PDF 렌더링 캔버스 -->
     <div class="canvas-container">
         <canvas id="pdf-render"></canvas>
+        <br>
         <input type="text" id="text-input" placeholder="입력할 텍스트를 작성하세요" />
     </div>
 
@@ -210,7 +208,7 @@
 
         async function renderPage(num) {
             const page = await pdfDoc.getPage(num);
-            viewport = page.getViewport({ scale: 1.5 });
+            viewport = page.getViewport({ scale: 1 });
             canvas.height = viewport.height;
             canvas.width = viewport.width;
 
