@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PDF 업로드 및 좌표에 데이터 입력</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            height: 100vh;
+            background-color: #f4f4f4;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .buttonBox {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 10px; /* 버튼 간격 추가 */
+            margin-top: 20px; /* 상단 여백 */
+        }
+
+        .buttonBox button, .custom-file-upload {
+            padding: 5px 10px;
+            background-color: #06F;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            font-family: 'Arial', sans-serif;
+            box-shadow: 0px 4px 6px rgba(0, 0, 0, 0.1);
+            transition: background-color 0.3s ease, transform 0.2s ease;
+            text-align: center;
+        }
+
+        .buttonBox button:hover, .custom-file-upload:hover {
+            background-color: #0056b3;
+        }
+
+        .buttonBox button:active, .custom-file-upload:active {
+            transform: scale(0.98);
+        }
+
+        /* 숨긴 실제 input 파일 선택 요소 */
+        input[type="file"] {
+            display: none;
+        }
+
+        /* 파일 업로드 버튼 디자인 */
+        .custom-file-upload {
+            cursor: pointer;
+        }
+
+        #pdf-render {
+            max-width: 794px;
+            max-height: 1123px;
+            width: 100%;
+            height: auto;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            margin-top: 20px;
+        }
+
+        #text-input {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            border: 1px solid #ccc;
+            padding: 5px;
+            font-size: 16px;
+            outline: none;
+            display: none;
+            width: 200px;
+        }
+
+        .canvas-container {
+            position: relative;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            width: 95%;
+            height: auto;
+        }
+
+        #controls {
+            margin-top: 10px;
+            text-align: center;
+        }
+
+        button {
+            margin: 5px;
+        }
+
+        @media print {
+            body * {
+                margin: 0;
+                padding: 0;
+                visibility: hidden;
+                background-color: none;
+            }
+            #pdf-render {
+                visibility: visible;
+                position: absolute;
+                top: 0;
+                left: 0;
+                width: 100%;
+                transform: translateY(-85px);
+            }
+            #pdf-container {
+                visibility: visible;
+                width: 100%;
+            }
+            #text-input {
+                display: none; /* 인쇄할 때 텍스트 입력 요소 완전히 숨기기 */
+
+            #pdf-container canvas {
+                page-break-after: always;
+            }
+             /* 전체 페이지 여백 없애기 */
+            @page {
+                margin: 0;
+            }
+        }
+        }
+       
+    </style>
+</head>
+<body>
+
+    <div class="buttonBox">
+        <!-- 파일 업로드 버튼을 꾸민 커스텀 버튼 -->
+        <label for="pdf-upload" class="custom-file-upload">
+            PDF 파일 선택
+        </label>
+        <input type="file" id="pdf-upload" accept="application/pdf" />
+        <!-- 저장 버튼 -->
+        <button id="save-pdf">PDF 저장(한글x)</button>
+        <!-- 인쇄 버튼 -->
+        <button id="print-pdf">PDF 인쇄(한글사용)</button>
+    </div>
+    <div id="controls">
+        <button id="prev-page">이전</button>
+        <button id="next-page">다음</button>
+        <span>Page: <span id="page-num"></span> / <span id="page-count"></span></span>
+    </div>
+
+    <!-- PDF 렌더링 캔버스 -->
+    <div class="canvas-container">
+        <canvas id="pdf-render"></canvas>
+        <input type="text" id="text-input" placeholder="입력할 텍스트를 작성하세요" />
+    </div>
+
+
+    <!-- External Libraries -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.9.359/pdf.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.16.0/pdf-lib.min.js"></script>
+    <script src="/fontkit/fontkit.umd.js"></script>
+
+    <script>
+        const pdfInput = document.getElementById('pdf-upload');
+        const canvas = document.getElementById('pdf-render');
+        const ctx = canvas.getContext('2d');
+        const textInput = document.getElementById('text-input');
+        const prevPageBtn = document.getElementById('prev-page');
+        const nextPageBtn = document.getElementById('next-page');
+        const pageNumElem = document.getElementById('page-num');
+        const pageCountElem = document.getElementById('page-count');
+        const saveBtn = document.getElementById('save-pdf');
+        const printBtn = document.getElementById('print-pdf');
+
+        let pdfDoc = null;
+        let pageNum = 1;
+        let pageCount = 0;
+        let pdfBytes = null;
+        let addedTexts = [];
+        let viewport = null;
+        let selectedX = null;
+        let selectedY = null;
+
+        pdfInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (file && file.type === 'application/pdf') {
+                const fileReader = new FileReader();
+
+                fileReader.onload = function() {
+                    const typedarray = new Uint8Array(this.result);
+                    pdfBytes = typedarray;
+                    loadPDF(typedarray);
+                };
+
+                fileReader.readAsArrayBuffer(file);
+            } else {
+                alert('Please upload a valid PDF file.');
+            }
+        });
+
+        async function loadPDF(typedarray) {
+            const loadingTask = pdfjsLib.getDocument({ data: typedarray });
+            pdfDoc = await loadingTask.promise;
+            pageCount = pdfDoc.numPages;
+            pageCountElem.textContent = pageCount;
+            renderPage(pageNum);
+        }
+
+        async function renderPage(num) {
+            const page = await pdfDoc.getPage(num);
+            viewport = page.getViewport({ scale: 1.5 });
+            canvas.height = viewport.height;
+            canvas.width = viewport.width;
+
+            const renderContext = {
+                canvasContext: ctx,
+                viewport: viewport
+            };
+
+            await page.render(renderContext);
+            pageNumElem.textContent = num;
+            renderAddedTexts();
+        }
+
+        function renderAddedTexts() {
+            addedTexts.forEach((info) => {
+                if (info.page === pageNum) {
+                    ctx.font = '16px Arial';
+                    ctx.fillStyle = 'black';
+                    ctx.fillText(info.text, info.x, info.y);
+                }
+            });
+        }
+
+        prevPageBtn.addEventListener('click', () => {
+            if (pageNum <= 1) return;
+            pageNum--;
+            renderPage(pageNum);
+        });
+
+        nextPageBtn.addEventListener('click', () => {
+            if (pageNum >= pageCount) return;
+            pageNum++;
+            renderPage(pageNum);
+        });
+
+        canvas.addEventListener('click', function(event) {
+            const rect = canvas.getBoundingClientRect();
+            const clickX = (event.clientX - rect.left) * (canvas.width / rect.width);
+            const clickY = (event.clientY - rect.top) * (canvas.height / rect.height);
+
+            selectedX = clickX;
+            selectedY = clickY;
+
+            textInput.style.left = `${event.clientX}px`;
+            textInput.style.top = `${event.clientY}px`;
+            textInput.style.display = 'block';
+            textInput.focus();
+        });
+
+        textInput.addEventListener('keydown', function(event) {
+            if (event.key === 'Enter') {
+                const text = textInput.value;
+
+                if (text && selectedX !== null && selectedY !== null) {
+                    addedTexts.push({
+                        page: pageNum,
+                        text: text,
+                        x: selectedX,
+                        y: selectedY
+                    });
+
+                    ctx.font = '16px Arial';
+                    ctx.fillStyle = 'black';
+                    ctx.fillText(text, selectedX, selectedY);
+
+                    textInput.value = '';
+                    textInput.style.display = 'none';
+                    selectedX = null;
+                    selectedY = null;
+                }
+            }
+        });
+
+        saveBtn.addEventListener('click', async () => {
+            const pdfDocCopy = await PDFLib.PDFDocument.load(pdfBytes);
+            pdfDocCopy.registerFontkit(fontkit);
+
+            const fontUrl = '/fonts/NanumGothic-Regular.ttf';
+            const fontBytes = await fetch(fontUrl).then(res => res.arrayBuffer());
+            const customFont = await pdfDocCopy.embedFont(fontBytes);
+
+            for (const textInfo of addedTexts) {
+                const page = await pdfDocCopy.getPage(textInfo.page - 1);
+                const { height, width } = page.getSize();
+
+                page.drawText(textInfo.text, {
+                    x: textInfo.x / viewport.width * width,
+                    y: height - (textInfo.y / viewport.height * height),
+                    size: 12,
+                    font: customFont,
+                    color: PDFLib.rgb(0, 0, 0)
+                });
+            }
+
+            const modifiedPdfBytes = await pdfDocCopy.save();
+            const blob = new Blob([modifiedPdfBytes], { type: 'application/pdf' });
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = 'modified.pdf';
+            link.click();
+        });
+
+        printBtn.addEventListener('click', () => {
+            window.print();
+        });
+    </script>
+</body>
+</html>
